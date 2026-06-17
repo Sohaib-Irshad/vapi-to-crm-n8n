@@ -1,0 +1,543 @@
+{
+  "nodes": [
+    {
+      "parameters": {
+        "path": "vapi-webhook",
+        "options": {
+          "rawBody": true
+        }
+      },
+      "id": "webhook-receiver",
+      "name": "VAPI Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [200, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Simple security validation\nconst body = $input.first().json.body;\nconst headers = $input.first().json.headers || {};\n\n// Basic validation\nif (!body || !body.message) {\n  return {\n    isValid: false,\n    error: 'Invalid webhook payload'\n  };\n}\n\n// Extract call data\nconst message = body.message;\nreturn {\n  isValid: true,\n  callId: message.call?.id || `call_${Date.now()}`,\n  transcript: message.transcript || '',\n  callDuration: message.durationSeconds || 0,\n  phoneNumber: message.call?.phoneNumber || '',\n  endedReason: message.endedReason || '',\n  cost: message.cost || 0,\n  recordingUrl: message.recordingUrl || '',\n  callDate: message.startedAt || new Date().toISOString(),\n  rawData: message\n};"
+      },
+      "id": "simple-validation",
+      "name": "Simple Validation",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [400, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "leftValue": "={{ $json.isValid }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equal"
+              }
+            }
+          ]
+        }
+      },
+      "id": "validation-check",
+      "name": "Is Valid?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [600, 300]
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "You are an expert data extraction agent. Extract customer information from this call transcript and return ONLY valid JSON.\n\nCALL TRANSCRIPT:\n{{ $json.transcript }}\n\nCALL METADATA:\n- Duration: {{ $json.callDuration }} seconds\n- Phone: {{ $json.phoneNumber }}\n- Date: {{ $json.callDate }}\n- Ended: {{ $json.endedReason }}\n\nEXTRACT THESE FIELDS:\n{\n  \"customerName\": \"Full real name (not 'customer', 'caller', 'user')\",\n  \"customerPhone\": \"Clean phone number\",\n  \"customerEmail\": \"Email if mentioned\",\n  \"appointmentRequested\": true/false,\n  \"appointmentDetails\": \"When they want to schedule\",\n  \"serviceInterest\": \"What service they need\",\n  \"urgencyLevel\": \"low/medium/high\",\n  \"callSentiment\": \"positive/neutral/negative\",\n  \"keyTopics\": [\"list\", \"of\", \"main\", \"topics\"],\n  \"customerIntent\": \"What they're trying to accomplish\",\n  \"nextAction\": \"What should happen next\",\n  \"confidence\": 0.95,\n  \"extractionNotes\": \"Any important details or uncertainties\"\n}\n\nRULES:\n- Return ONLY valid JSON, no explanations\n- Use 'Unknown' for missing required fields\n- Be confident but honest about uncertainty\n- Extract the ACTUAL name they provide, not generic terms\n- Detect appointment requests from context, not just explicit asks\n- Rate confidence 0-1 based on transcript clarity"
+      },
+      "id": "data-extractor",
+      "name": "AI Data Extractor",
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "typeVersion": 1.7,
+      "position": [800, 200]
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "You are a customer classification expert. Analyze this extracted customer data and classify them for CRM purposes.\n\nEXTRACTED DATA:\n{{ $json.text }}\n\nCALL METADATA:\n- Call Duration: {{ $('Simple Validation').first().json.callDuration }} seconds\n- Phone: {{ $('Simple Validation').first().json.phoneNumber }}\n- Cost: ${{ $('Simple Validation').first().json.cost }}\n- Recording: {{ $('Simple Validation').first().json.recordingUrl }}\n\nCLASSIFY AND RETURN JSON:\n{\n  \"customerStatus\": \"new/returning/vip\",\n  \"customerValue\": \"low/medium/high/premium\",\n  \"priorityLevel\": \"low/medium/high/urgent\",\n  \"leadQuality\": \"cold/warm/hot\",\n  \"followUpType\": \"call/email/appointment/task\",\n  \"followUpTiming\": \"immediate/within_hour/within_day/within_week\",\n  \"assignTo\": \"sales/support/manager/specialist\",\n  \"expectedRevenue\": 0,\n  \"conversionProbability\": 0.75,\n  \"customerTags\": [\"tag1\", \"tag2\"],\n  \"riskFactors\": [\"any concerns\"],\n  \"opportunities\": [\"upsell potential\"],\n  \"recommendedActions\": [\"specific next steps\"],\n  \"classificationReasoning\": \"Why you classified them this way\"\n}\n\nCLASSIFICATION LOGIC:\n- NEW: First time caller, no history\n- RETURNING: Mentions previous service/calls\n- VIP: High value service, urgent need, or premium indicators\n- HIGH PRIORITY: Appointment requested, urgent need, or high value\n- HOT LEAD: Ready to buy/schedule, clear intent\n- Consider: service type, urgency, call quality, engagement level"
+      },
+      "id": "customer-classifier",
+      "name": "AI Customer Classifier",
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "typeVersion": 1.7,
+      "position": [800, 400]
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "You are a data standardization agent. Take the extracted customer data and classification, then create a standardized record for our CRM system.\n\nEXTRACTED DATA:\n{{ $('AI Data Extractor').first().json.text }}\n\nCLASSIFICATION:\n{{ $json.text }}\n\nORIGINAL CALL DATA:\n{{ $('Simple Validation').first().json }}\n\nCREATE STANDARDIZED RECORD (JSON only):\n{\n  \"record_id\": \"{{ $('Simple Validation').first().json.callId }}\",\n  \"created_at\": \"{{ $('Simple Validation').first().json.callDate }}\",\n  \"customer_full_name\": \"Standardized full name\",\n  \"primary_phone\": \"Clean format: +1234567890\",\n  \"primary_email\": \"email@domain.com or empty\",\n  \"customer_status\": \"from classification\",\n  \"lead_priority\": \"low/medium/high/urgent\",\n  \"service_category\": \"Standardized service name\",\n  \"appointment_needed\": true/false,\n  \"appointment_preference\": \"When they prefer\",\n  \"call_duration_minutes\": 0,\n  \"call_sentiment\": \"positive/neutral/negative\",\n  \"lead_source\": \"phone_call\",\n  \"assigned_to\": \"team member\",\n  \"follow_up_method\": \"call/email/text\",\n  \"follow_up_date\": \"ISO date\",\n  \"estimated_value\": 0,\n  \"tags\": [\"relevant\", \"tags\"],\n  \"notes\": \"Key points and next steps\",\n  \"requires_manager_review\": true/false,\n  \"recording_url\": \"{{ $('Simple Validation').first().json.recordingUrl }}\",\n  \"call_cost\": {{ $('Simple Validation').first().json.cost }},\n  \"data_quality_score\": 0.95,\n  \"processing_timestamp\": \"{{ new Date().toISOString() }}\"\n}\n\nSTANDARDIZATION RULES:\n- Clean phone: remove spaces, add country code\n- Standardize service names to your categories\n- Calculate follow_up_date based on priority\n- Set manager_review for VIP/high-value/urgent\n- Generate meaningful notes combining key info\n- Assign data_quality_score based on completeness"
+      },
+      "id": "field-standardizer",
+      "name": "AI Field Standardizer",
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "typeVersion": 1.7,
+      "position": [1000, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Parse the standardized JSON response\ntry {\n  const aiResponse = $input.first().json.text;\n  const standardizedData = JSON.parse(aiResponse);\n  \n  return {\n    ...standardizedData,\n    processing_status: 'success',\n    ai_processed: true\n  };\n} catch (error) {\n  // Fallback parsing if JSON is malformed\n  const aiText = $input.first().json.text || '';\n  \n  return {\n    record_id: $('Simple Validation').first().json.callId,\n    customer_full_name: 'Parsing Error - Manual Review Required',\n    processing_status: 'json_parse_error',\n    ai_processed: false,\n    raw_ai_response: aiText,\n    error: error.message,\n    requires_manager_review: true,\n    created_at: new Date().toISOString()\n  };\n}"
+      },
+      "id": "parse-standardized",
+      "name": "Parse Standardized Data",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1200, 300]
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "value": "https://docs.google.com/spreadsheets/d/YOUR_GOOGLE_SHEET_ID/edit?usp=sharing",
+          "mode": "url"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Sheet1",
+          "mode": "name"
+        },
+        "options": {}
+      },
+      "id": "lookup-existing",
+      "name": "Lookup Existing Customer",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4,
+      "position": [1400, 300],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "your-google-sheets-credential"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "leftValue": "={{ $json.appointment_needed }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equal"
+              }
+            }
+          ]
+        }
+      },
+      "id": "appointment-check",
+      "name": "Appointment Needed?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [1600, 300]
+    },
+    {
+      "parameters": {
+        "calendar": {
+          "__rl": true,
+          "value": "your-calendar-id",
+          "mode": "list"
+        },
+        "title": "={{ $json.customer_full_name }} - {{ $json.service_category }}",
+        "start": "={{ new Date(Date.now() + 24*60*60*1000).toISOString() }}",
+        "end": "={{ new Date(Date.now() + 24*60*60*1000 + 60*60*1000).toISOString() }}",
+        "description": "Customer: {{ $json.customer_full_name }}\nPhone: {{ $json.primary_phone }}\nService: {{ $json.service_category }}\nNotes: {{ $json.notes }}\nPriority: {{ $json.lead_priority }}",
+        "additionalFields": {}
+      },
+      "id": "create-calendar",
+      "name": "Create Calendar Event",
+      "type": "n8n-nodes-base.googleCalendar",
+      "typeVersion": 1,
+      "position": [1800, 200],
+      "credentials": {
+        "googleCalendarOAuth2Api": {
+          "id": "your-google-calendar-credential"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "authentication": "oAuth2",
+        "team": "your-team-id",
+        "space": "your-space-id",
+        "folder": "your-folder-id",
+        "list": "your-list-id",
+        "name": "={{ $json.customer_status === 'returning' ? '🔄' : '🆕' }} {{ $json.customer_full_name }} - {{ $json.service_category }}",
+        "description": "**Customer Details:**\n- Name: {{ $json.customer_full_name }}\n- Phone: {{ $json.primary_phone }}\n- Email: {{ $json.primary_email }}\n- Status: {{ $json.customer_status }}\n- Priority: {{ $json.lead_priority }}\n\n**Service:**\n- Category: {{ $json.service_category }}\n- Appointment: {{ $json.appointment_needed ? 'Required' : 'Not needed' }}\n\n**Call Info:**\n- Duration: {{ $json.call_duration_minutes }} minutes\n- Sentiment: {{ $json.call_sentiment }}\n- Quality Score: {{ $json.data_quality_score }}\n\n**Next Steps:**\n{{ $json.notes }}\n\n**Recording:** {{ $json.recording_url }}",
+        "additionalFields": {
+          "assignees": ["your-user-id"],
+          "dueDate": "={{ new Date($json.follow_up_date).getTime() }}",
+          "priority": "={{ $json.lead_priority === 'urgent' ? 1 : $json.lead_priority === 'high' ? 2 : $json.lead_priority === 'medium' ? 3 : 4 }}",
+          "status": "to do",
+          "tags": ["{{ $json.tags.join('\", \"') }}"]
+        }
+      },
+      "id": "create-task",
+      "name": "Create ClickUp Task",
+      "type": "n8n-nodes-base.clickUp",
+      "typeVersion": 1,
+      "position": [1800, 400],
+      "credentials": {
+        "clickUpOAuth2Api": {
+          "id": "your-clickup-credential"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "appendOrUpdate",
+        "documentId": {
+          "__rl": true,
+          "value": "https://docs.google.com/spreadsheets/d/YOUR_GOOGLE_SHEET_ID/edit?usp=sharing",
+          "mode": "url"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Sheet1",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "Record ID": "={{ $json.record_id }}",
+            "Customer Name": "={{ $json.customer_full_name }}",
+            "Phone": "={{ $json.primary_phone }}",
+            "Email": "={{ $json.primary_email }}",
+            "Status": "={{ $json.customer_status }}",
+            "Priority": "={{ $json.lead_priority }}",
+            "Service": "={{ $json.service_category }}",
+            "Appointment Needed": "={{ $json.appointment_needed }}",
+            "Call Duration": "={{ $json.call_duration_minutes }}",
+            "Sentiment": "={{ $json.call_sentiment }}",
+            "Assigned To": "={{ $json.assigned_to }}",
+            "Follow Up Date": "={{ $json.follow_up_date }}",
+            "Follow Up Method": "={{ $json.follow_up_method }}",
+            "Estimated Value": "={{ $json.estimated_value }}",
+            "Tags": "={{ $json.tags.join(', ') }}",
+            "Notes": "={{ $json.notes }}",
+            "Manager Review": "={{ $json.requires_manager_review }}",
+            "Recording URL": "={{ $json.recording_url }}",
+            "Data Quality": "={{ $json.data_quality_score }}",
+            "Created": "={{ $json.created_at }}",
+            "Last Updated": "={{ $json.processing_timestamp }}"
+          },
+          "matchingColumns": ["Record ID"]
+        }
+      },
+      "id": "update-sheet",
+      "name": "Update Google Sheet",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4,
+      "position": [2000, 300],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "your-google-sheets-credential"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "leftValue": "={{ $json.requires_manager_review }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equal"
+              }
+            }
+          ]
+        }
+      },
+      "id": "manager-review-check",
+      "name": "Needs Manager Review?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [2200, 300]
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "You are a manager notification agent. Create a concise alert for a call that needs management attention.\n\nCUSTOMER DATA:\n{{ $json }}\n\nCreate a manager alert message (text only, no JSON):\n\n🚨 MANAGER REVIEW REQUIRED\n\nCustomer: [Name]\nPhone: [Phone]\nReason for Review: [Why this needs attention]\nPriority: [Level]\nRecommended Action: [What should the manager do]\nUrgency: [How quickly to respond]\n\nKey Details:\n- [Most important points]\n- [Service requested]\n- [Any red flags or opportunities]\n\nNext Steps:\n[Specific actions for manager]\n\nCall Recording: [URL if available]"
+      },
+      "id": "manager-alert",
+      "name": "Generate Manager Alert",
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "typeVersion": 1.7,
+      "position": [2400, 200]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={\n  \"success\": true,\n  \"callId\": \"{{ $json.record_id }}\",\n  \"customerName\": \"{{ $json.customer_full_name }}\",\n  \"status\": \"{{ $json.processing_status }}\",\n  \"priority\": \"{{ $json.lead_priority }}\",\n  \"appointmentCreated\": {{ $json.calendar_event_id ? true : false }},\n  \"taskCreated\": {{ $json.clickup_task_id ? true : false }},\n  \"managerReview\": {{ $json.requires_manager_review }},\n  \"timestamp\": \"{{ $json.processing_timestamp }}\",\n  \"message\": \"Call processed successfully by AI agents\"\n}"
+      },
+      "id": "success-response",
+      "name": "Success Response",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [2400, 400]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={\n  \"error\": true,\n  \"message\": \"Invalid webhook payload\",\n  \"details\": \"{{ $json.error }}\",\n  \"timestamp\": \"{{ new Date().toISOString() }}\"\n}"
+      },
+      "id": "error-response",
+      "name": "Error Response",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [600, 500]
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "id": "gemini-model",
+      "name": "Google Gemini Chat Model",
+      "type": "@n8n/n8n-nodes-langchain.lmChatGoogleGemini",
+      "typeVersion": 1,
+      "position": [600, 100],
+      "credentials": {
+        "googlePalmApi": {
+          "id": "your-gemini-credential"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "VAPI Webhook": {
+      "main": [
+        [
+          {
+            "node": "Simple Validation",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Simple Validation": {
+      "main": [
+        [
+          {
+            "node": "Is Valid?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Is Valid?": {
+      "main": [
+        [
+          {
+            "node": "AI Data Extractor",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Error Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI Data Extractor": {
+      "main": [
+        [
+          {
+            "node": "AI Customer Classifier",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI Customer Classifier": {
+      "main": [
+        [
+          {
+            "node": "AI Field Standardizer",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI Field Standardizer": {
+      "main": [
+        [
+          {
+            "node": "Parse Standardized Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Standardized Data": {
+      "main": [
+        [
+          {
+            "node": "Lookup Existing Customer",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Lookup Existing Customer": {
+      "main": [
+        [
+          {
+            "node": "Appointment Needed?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Appointment Needed?": {
+      "main": [
+        [
+          {
+            "node": "Create Calendar Event",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Create ClickUp Task",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Create ClickUp Task",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create Calendar Event": {
+      "main": [
+        [
+          {
+            "node": "Update Google Sheet",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create ClickUp Task": {
+      "main": [
+        [
+          {
+            "node": "Update Google Sheet",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Update Google Sheet": {
+      "main": [
+        [
+          {
+            "node": "Needs Manager Review?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Needs Manager Review?": {
+      "main": [
+        [
+          {
+            "node": "Generate Manager Alert",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Success Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Generate Manager Alert": {
+      "main": [
+        [
+          {
+            "node": "Success Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Google Gemini Chat Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "AI Data Extractor",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "AI Customer Classifier",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "AI Field Standardizer",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Generate Manager Alert",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {},
+  "meta": {
+    "templateCredsSetupCompleted": false
+  }
+}
