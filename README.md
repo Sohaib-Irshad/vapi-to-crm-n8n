@@ -1,6 +1,8 @@
 # 📞 VAPI Call → AI-Powered CRM Automation (n8n Workflow)
 
 An n8n workflow that turns every VAPI voice-AI phone call into a fully processed CRM record — no manual data entry required. The workflow listens for VAPI's end-of-call webhook, runs the transcript through a three-stage Gemini AI pipeline, and automatically syncs the result to Google Sheets, books a Google Calendar appointment when needed, opens a ClickUp task, and escalates high-priority leads to a manager.
+<img width="1543" height="672" alt="img" src="https://github.com/user-attachments/assets/086965f6-873a-4527-a20e-44daa7b92a49" />
+
 
 ## Overview
 
